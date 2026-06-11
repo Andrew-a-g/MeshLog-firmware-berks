@@ -34,6 +34,9 @@
 #define DIRECT_SEND_PERHOP_EXTRA_MILLIS   250
 
 #define  PUBLIC_GROUP_PSK "izOH6cXN6mrJ5e26oRXNcg=="
+#define  BERKS_GROUP_PSK "HGoL99Hmkqa9npLIe1GHJw=="
+#define  BERKSBOT_GROUP_PSK "lJgTs198kuHSA6I9EGn2Uw=="
+#define  JOKES_GROUP_PSK "q+YQ1h3uUIwKwYeTw2xBww=="
 #define REQ_TYPE_GET_TELEMETRY_DATA     0x03
 
 #ifdef WEBSERVER_ENABLE
@@ -92,6 +95,9 @@ class MyMesh : public BaseChatMesh, ContactVisitor {
     LoggerMeshTables* _tables;
     uint32_t expected_ack_crc;
     ChannelDetails* _public;
+    ChannelDetails* _berks;
+    ChannelDetails* _berksbot;
+    ChannelDetails* _jokes;
     unsigned long last_msg_sent;
     std::vector<String> chatHistory;
     long chatHistoryId = 0;
@@ -1255,6 +1261,9 @@ public:
         loadChannels();
         loadTelemetryRules();
         _public = addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
+        _berks = addChannel("#berks", BERKS_GROUP_PSK);
+        _berksbot = addChannel("#berksbot", BERKSBOT_GROUP_PSK);
+        _jokes = addChannel("#jokes", JOKES_GROUP_PSK);
         WiFi.setHostname(getNodePrefs()->node_name);
 
         toggleWiFi(true);
