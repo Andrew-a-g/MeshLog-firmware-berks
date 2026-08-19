@@ -4,6 +4,7 @@
 #include <Mesh.h>
 
 #include <queue>
+#include <utility>
 #include <SPIFFS.h>
 #include <RTClib.h>
 #include <target.h>
@@ -17,12 +18,14 @@
 #include "../utils.h"
 #include "../version.h"
 
+#define MESHLOG_VERSION 2
 
 #define TELEMETRY_VERSION 1
 #define TELEMETRY_MAX_RULES 16
 #define TELEMETRY_DEFAULT_RETRIES 3
 #define TELEMETRY_RETRY_INTERVAL 30000 //ms
 #define TELEMETRY_MIN_INTERVAL 10800 // 3 hours
+#define CONTACTS_SAVE_INTERVAL_MILLIS (6UL * 60UL * 60UL * 1000UL)
 
 #define MAX_LOG_QUEUE_SIZE  32
 
@@ -55,14 +58,26 @@ struct {
           Serial.printf("Discarded message (%u) %s\n", discarded, queue.front().c_str());
       queue.pop();
     }
-      queue.push(str);
+      queue.emplace(str);
+      xSemaphoreGive(mutex);
+  }
+
+  void push(String&& str) {
+      xSemaphoreTake(mutex, portMAX_DELAY);
+      while (queue.size() >= MAX_LOG_QUEUE_SIZE) {
+          discarded++;
+          Serial.printf("Discarded message (%u) %s\n", discarded, queue.front().c_str());
+          queue.pop();
+      }
+      queue.emplace(std::move(str));
       xSemaphoreGive(mutex);
   }
 
   void push(const JsonDocument& doc) {
     String postData;
+      postData.reserve(measureJson(doc) + 1);
     serializeJson(doc, postData);
-    push(postData);
+      push(std::move(postData));
   }
 
   size_t size() { 
@@ -71,12 +86,23 @@ struct {
     xSemaphoreGive(mutex);
     return s;
   }
-  String front() {
+
+  bool peek(String& out, size_t* queued = nullptr) {
     xSemaphoreTake(mutex, portMAX_DELAY);
-    String val = queue.empty() ? String() : queue.front();
+      size_t count = queue.size();
+      if (queued) {
+          *queued = count;
+      }
+      if (count == 0) {
     xSemaphoreGive(mutex);
-    return val;
+          return false;
+      }
+
+      out = queue.front();
+      xSemaphoreGive(mutex);
+      return true;
   }
+
   void pop() {
     xSemaphoreTake(mutex, portMAX_DELAY);
     if (!queue.empty()) {
@@ -122,6 +148,98 @@ class MyMesh : public BaseChatMesh, ContactVisitor {
     // pkt decoded?
     bool rawDecoded = false;
     bool ntpSynced = false;
+    unsigned long contactsNextSave = 0;
+    bool contactsDirty = false;
+
+    bool isTelemetryProtectedContact(const ContactInfo& contact) const {
+        for (TelemetryRule* rule : _telemetry.rules) {
+            if (rule->key_len > 0 && memcmp(contact.id.pub_key, rule->pubkey, rule->key_len) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool shouldMakeSpaceForNewContact(mesh::Packet* pkt, const uint8_t* app_data, size_t app_data_len) {
+        if (getNumContacts() < MAX_CONTACTS) {
+            return false;
+        }
+
+        AdvertDataParser parser(app_data, app_data_len);
+        if (!(parser.isValid() && parser.hasName())) {
+            return false;
+        }
+
+        if (!shouldAutoAddContactType(parser.getType())) {
+            return false;
+        }
+
+        uint8_t max_hops = getAutoAddMaxHops();
+        if (max_hops > 0 && pkt->getPathHashCount() >= max_hops) {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool evictOldestNonTelemetryContact() {
+        ContactsIterator iter;
+        ContactInfo c;
+        ContactInfo oldest = {};
+        bool found = false;
+
+        while (iter.hasNext(this, c)) {
+            if (isTelemetryProtectedContact(c)) {
+                continue;
+            }
+
+            if (!found || c.last_advert_timestamp < oldest.last_advert_timestamp) {
+                oldest = c;
+                found = true;
+            }
+        }
+
+        if (!found) {
+            return false;
+        }
+
+        if (curr_recipient && curr_recipient->id.matches(oldest.id)) {
+            curr_recipient = nullptr;
+        }
+        if (curr_telemetry && curr_telemetry->id.matches(oldest.id)) {
+            curr_telemetry = nullptr;
+        }
+
+        if (!removeContact(oldest)) {
+            return false;
+        }
+
+        char key[16];
+        int key_pos = 0;
+        for (int i = 0; i < 4; i++) {
+            key_pos += snprintf(&key[key_pos], sizeof(key) - key_pos, "%02X:", oldest.id.pub_key[i]);
+        }
+        snprintf(&key[key_pos], sizeof(key) - key_pos, "..");
+        Serial.printf("Evicted contact: %s (%s)\n", oldest.name, key);
+        return true;
+    }
+
+    void scheduleContactsSave() {
+        contactsDirty = true;
+        if (contactsNextSave == 0) {
+            contactsNextSave = futureMillis(CONTACTS_SAVE_INTERVAL_MILLIS);
+        }
+    }
+
+    void flushScheduledContactsSave() {
+        if (!contactsDirty || contactsNextSave == 0 || !millisHasNowPassed(contactsNextSave)) {
+            return;
+        }
+
+        saveContacts();
+        contactsDirty = false;
+        contactsNextSave = 0;
+    }
 
     void loadContacts() {
         if (_fs->exists("/contacts")) {
@@ -329,8 +447,6 @@ class MyMesh : public BaseChatMesh, ContactVisitor {
     }
 
 public:
-    bool dbg = false;
-
     struct {
         long last = 0;
         struct {
@@ -494,53 +610,82 @@ protected:
         if (stats.last == 0) stats.last = millis();
     }
 
+    void reportRaw(mesh::Packet* pkt) {
+        // log raw
+        int phType = (pkt->header >> PH_TYPE_SHIFT) & PH_TYPE_MASK;
+
+        if (debugPrint()) {
+            Serial.println("[RAW] Received packet:");
+            Serial.printf("      header:          %u\n", pkt->header);
+            Serial.printf("        route-type:    %u\n", pkt->header & PH_ROUTE_MASK); // 2 bits
+            Serial.printf("        payload-type:  %s (%u)\n", type2str(phType), phType); // 4 bits
+            Serial.printf("        payload-vers:  %u\n", (pkt->header >> PH_VER_SHIFT) & PH_VER_MASK); // 2 bits
+            Serial.printf("      payload_len:     %u\n", pkt->payload_len);
+            Serial.printf("      path_len:        %u\n", pkt->path_len);
+            Serial.printf("      transport_codes: %u %u\n", pkt->transport_codes[0], pkt->transport_codes[1]);
+            Serial.printf("      snr:             %i\n", pkt->_snr);
+            Serial.println();
+        }
+
+        uint8_t hash[MAX_HASH_SIZE];
+        pkt->calculatePacketHash(hash);
+
+        uint8_t rawData[256];
+        uint8_t rawSize = pkt->writeTo(rawData);
+
+        char sender[(PUB_KEY_SIZE * 2) + 1];
+        char strdata[(rawSize * 2) + 1];
+        char strhash[MAX_HASH_SIZE * 2 + 1];
+
+        mesh::Utils::toHex(sender, self_id.pub_key, PUB_KEY_SIZE);
+        mesh::Utils::toHex(strdata, rawData, rawSize);
+        mesh::Utils::toHex(strhash, hash, MAX_HASH_SIZE);
+
+        JsonDocument doc;
+        doc["version"] = MESHLOG_VERSION;
+        doc["type"] = "RAW";
+        doc["reporter"] = sender;
+        doc["time"]["local"] = getRTCClock()->getCurrentTime();
+        doc["packet"]["raw"] = strdata;
+        doc["packet"]["snr"] = pkt->getSNR();
+        messageQueue.push(doc);
+    }
+
     mesh::DispatcherAction onRecvPacket(mesh::Packet* pkt) override {
         // process packet
         rawDecoded = false;
         mesh::DispatcherAction act = Mesh::onRecvPacket(pkt);
 
-        // log raw
-        if (_logp.doraw) {
-            int phType = (pkt->header >> PH_TYPE_SHIFT) & PH_TYPE_MASK;
+        // log packet
+        reportRaw(pkt);
 
-            if (debugPrint()) {
-                Serial.println("[RAW] Received packet:");
-                Serial.printf("      header:          %u\n", pkt->header);
-                Serial.printf("        route-type:    %u\n", pkt->header & PH_ROUTE_MASK); // 2 bits
-                Serial.printf("        payload-type:  %s (%u)\n", type2str(phType), phType); // 4 bits
-                Serial.printf("        payload-vers:  %u\n", (pkt->header >> PH_VER_SHIFT) & PH_VER_MASK); // 2 bits
-                Serial.printf("      payload_len:     %u\n", pkt->payload_len);
-                Serial.printf("      path_len:        %u\n", pkt->path_len);
-                Serial.printf("      transport_codes: %u %u\n", pkt->transport_codes[0], pkt->transport_codes[1]);
-                Serial.printf("      snr:             %i\n", pkt->_snr);
-                Serial.println();
-            }
+        String rtype = "unknown";
+        String ptype = "unknown";
 
-            uint8_t hash[MAX_HASH_SIZE];
-            pkt->calculatePacketHash(hash);
-
-            char sender[(PUB_KEY_SIZE * 2) + 1];
-            char payload[(pkt->payload_len * 2) + 1];
-            char strhash[MAX_HASH_SIZE * 2 + 1];
-
-            mesh::Utils::toHex(sender, self_id.pub_key, PUB_KEY_SIZE);
-            mesh::Utils::toHex(payload, pkt->payload, pkt->payload_len);
-            mesh::Utils::toHex(strhash, hash, MAX_HASH_SIZE);
-
-            JsonDocument doc;
-            doc["version"] = 1;
-            doc["type"] = "RAW";
-            doc["reporter"] = sender;
-            doc["time"]["local"] = getRTCClock()->getCurrentTime();
-            doc["packet"]["header"] = pkt->header;
-            doc["packet"]["path"] = getPath(pkt);
-            doc["packet"]["payload"] = payload;
-            doc["packet"]["snr"] = pkt->getSNR();
-            doc["packet"]["hash_size"] = pkt->getPathHashSize();
-            doc["packet"]["decoded"] = rawDecoded ? 1 : 0;
-            messageQueue.push(doc);
+        switch (pkt->getRouteType()) {
+            case ROUTE_TYPE_TRANSPORT_FLOOD: rtype = "transport-flood"; break;
+            case ROUTE_TYPE_FLOOD: rtype = "flood"; break;
+            case ROUTE_TYPE_DIRECT: rtype = "direct"; break;
+            case ROUTE_TYPE_TRANSPORT_DIRECT: rtype = "transport-direct"; break;
         }
 
+        switch (pkt->getPayloadType()) {
+            case PAYLOAD_TYPE_REQ: ptype = "req"; break;
+            case PAYLOAD_TYPE_RESPONSE: ptype = "response"; break;
+            case PAYLOAD_TYPE_TXT_MSG: ptype = "txt-msg"; break;
+            case PAYLOAD_TYPE_ACK: ptype = "ack"; break;
+            case PAYLOAD_TYPE_ADVERT: ptype = "advert"; break;
+            case PAYLOAD_TYPE_GRP_TXT: ptype = "grp-txt"; break;
+            case PAYLOAD_TYPE_GRP_DATA: ptype = "grp-data"; break;
+            case PAYLOAD_TYPE_ANON_REQ: ptype = "anon-req"; break;
+            case PAYLOAD_TYPE_PATH: ptype = "path"; break;
+            case PAYLOAD_TYPE_TRACE: ptype = "trace"; break;
+            case PAYLOAD_TYPE_MULTIPART: ptype = "multipart"; break;
+            case PAYLOAD_TYPE_CONTROL: ptype = "control"; break;
+            case PAYLOAD_TYPE_RAW_CUSTOM: ptype = "raw-custom"; break;
+        }
+
+        Serial.printf("Received packet: len=%u, type=%s, route_type=%s\n", pkt->payload_len, ptype.c_str(), rtype.c_str());
         return act;
     }
 
@@ -578,7 +723,7 @@ protected:
         mesh::Utils::toHex(strhash, hash, MAX_HASH_SIZE);
 
         JsonDocument doc;
-        doc["version"] = 1;
+        doc["version"] = MESHLOG_VERSION;
         doc["type"] = "ADV";
         doc["reporter"] = sender;
         doc["hash"] = strhash;
@@ -605,6 +750,9 @@ protected:
     void onAdvertRecv(mesh::Packet* pkt, const mesh::Identity& id, uint32_t timestamp, const uint8_t* app_data, size_t app_data_len) {
         ContactInfo* from = lookupContactByPubKey(id.pub_key, PUB_KEY_SIZE);
         bool is_new = from == NULL;
+        if (is_new && shouldMakeSpaceForNewContact(pkt, app_data, app_data_len)) {
+            evictOldestNonTelemetryContact();
+        }
         BaseChatMesh::onAdvertRecv(pkt, id, timestamp, app_data, app_data_len);  // chain to super impl
         from = lookupContactByPubKey(id.pub_key, PUB_KEY_SIZE);
 
@@ -627,7 +775,7 @@ protected:
     }
 
     void onDiscoveredContact(ContactInfo &contact, bool is_new, uint8_t path_len, const uint8_t* path) override {
-        saveContacts();
+        scheduleContactsSave();
     }
 
     String getPath(mesh::Packet* pkt) {
@@ -664,7 +812,7 @@ protected:
             Serial.printf("%02X", contact.out_path[i]);
         }
         Serial.println();
-        saveContacts();
+        scheduleContactsSave();
     }
 
     ContactInfo* processAck(const uint8_t *data) override {
@@ -712,7 +860,7 @@ protected:
         mesh::Utils::toHex(strhash, hash, MAX_HASH_SIZE);
 
         JsonDocument doc;
-        doc["version"] = 1;
+        doc["version"] = MESHLOG_VERSION;
         doc["type"] = "MSG";
         doc["reporter"] = sender;
         doc["hash"] = strhash;
@@ -781,7 +929,7 @@ protected:
         mesh::Utils::toHex(strhash, hash, MAX_HASH_SIZE);
 
         JsonDocument doc;
-        doc["version"] = 1;
+        doc["version"] = MESHLOG_VERSION;
         doc["type"] = "PUB";
         doc["reporter"] = sender;
         doc["hash"] = strhash;
@@ -831,7 +979,7 @@ protected:
         for (int i=0;i<inlen-3;i++) {
             if (text[i] == ':' && text[i+2] == '/') {
                 start = i + 2;
-                if (dbg) Serial.printf("Start at %u -> %c\n", start, text[start]);
+                if (debugPrint()) Serial.printf("Start at %u -> %c\n", start, text[start]);
                 break;
             }
         }
@@ -864,14 +1012,18 @@ protected:
             data = data.substring(npos + llen); // remove recipient name
         }
 
-        if (dbg) {
+        if (debugPrint()) {
             Serial.print("Bot Command:\n");
             Serial.printf("  reply:        %u\n", reply);
             Serial.printf("  hasRecipient: %u\n", hasRecipient);
             Serial.printf("  cmd:          %s\n", cmd.c_str());
         }
 
+#ifdef DEFAULT_BOT
+        if (!reply && hasRecipient) return;
+#else
         if (!reply) return;
+#endif
 
         if (cmd == "/echo") {
             data.trim();
@@ -899,8 +1051,8 @@ protected:
         }
 
         if (rep.length() > 0) {
-            if (dbg) Serial.print("CMD Reply: ");
-            if (dbg) Serial.println(rep);
+            if (debugPrint()) Serial.print("CMD Reply: ");
+            if (debugPrint()) Serial.println(rep);
             uint8_t temp[5+MAX_TEXT_LEN+32];
             uint32_t otimestamp = getRTCClock()->getCurrentTime();
             memcpy(temp, &otimestamp, 4);
@@ -925,7 +1077,7 @@ protected:
         uint32_t tag;
         memcpy(&tag, data, 4);
 
-        if (dbg) Serial.printf("onContactResponse: %08X - %02X\n", tag, data[4]);
+        if (debugPrint()) Serial.printf("onContactResponse: %08X - %02X\n", tag, data[4]);
         if (pending_login && memcmp(&pending_login, contact.id.pub_key, 4) == 0) {
             // response to pending sendLogin()
             pending_login = 0;
@@ -934,7 +1086,7 @@ protected:
                 pending_telemetry_next = millis() + 500;
                 pending_telemetry = 1;
                 telemetry_eta = millis() - telemetry_eta;
-                if (dbg) Serial.printf("Login OK, took %u ms\n", telemetry_eta);
+                if (debugPrint()) Serial.printf("Login OK, took %u ms\n", telemetry_eta);
                 if (curr_telemetry_rule) curr_telemetry_rule->loggedin = true;
                 rawDecoded = true;
             }
@@ -952,7 +1104,7 @@ protected:
             mesh::Utils::toHex(sender, self_id.pub_key, PUB_KEY_SIZE);
 
             JsonDocument doc;
-            doc["version"] = 1;
+            doc["version"] = MESHLOG_VERSION;
             doc["type"] = "TEL";
             doc["reporter"] = sender;
             doc["telemetry"] = JsonArray();
@@ -963,14 +1115,14 @@ protected:
             JsonArray telemetryRoot = doc["telemetry"].to<JsonArray>();
 
             //decode(uint8_t *buffer, uint8_t size, JsonArray &root);
-            if (dbg) Serial.println("decode telemetry");
+            if (debugPrint()) Serial.println("decode telemetry");
             telemetry.decode((uint8_t*) &data[4], len - 4, telemetryRoot);
             messageQueue.push(doc);
             rawDecoded = true;
 
             String output;
             serializeJson(doc, output);
-            if (dbg) Serial.println(output);
+            if (debugPrint()) Serial.println(output);
 
             String msgData;
             JsonDocument doc2;
@@ -986,7 +1138,7 @@ protected:
 
     void telemetryRun(int id, bool login=true, bool schedule=false) {
         if (id >= _telemetry.rules.size()) {
-            if (dbg) Serial.println("  ERROR: Bad ID");
+            if (debugPrint()) Serial.println("  ERROR: Bad ID");
             return;
         }
 
@@ -997,7 +1149,7 @@ protected:
         }
 
         if (curr_telemetry && !schedule) {
-            if (dbg) Serial.println("  ERROR: Already running");
+            if (debugPrint()) Serial.println("  ERROR: Already running");
             return;
         }
 
@@ -1005,7 +1157,7 @@ protected:
         curr_telemetry = lookupContactByPubKey(curr_telemetry_rule->pubkey, curr_telemetry_rule->key_len);
 
         if (!curr_telemetry) {
-            if (dbg) Serial.println("  ERROR: Contact not found");
+            if (debugPrint()) Serial.println("  ERROR: Contact not found");
             return;
         }
 
@@ -1032,7 +1184,7 @@ protected:
         if (curr_telemetry && pending_telemetry_retries >= _telemetry.retries) {
             if (pending_telemetry_next < millis()) {
                 curr_telemetry_rule->loggedin = false; // unset logged in flag.
-                if (dbg) Serial.printf("Telemetry to %s timed out\n", curr_telemetry->name);
+                if (debugPrint()) Serial.printf("Telemetry to %s timed out\n", curr_telemetry->name);
 
                 String msgData;
                 JsonDocument doc2;
@@ -1064,7 +1216,7 @@ protected:
                 telemetry_eta = millis();
                 uint32_t est_timeout;
                 int result = sendLogin(*curr_telemetry, curr_telemetry_rule->password, est_timeout);
-                if (dbg) Serial.printf("Telemetry login %s, result=%u, to=%u | %u/%u\n",
+                if (debugPrint()) Serial.printf("Telemetry login %s, result=%u, to=%u | %u/%u\n",
                     curr_telemetry->name,
                     result,
                     est_timeout,
@@ -1081,7 +1233,7 @@ protected:
                 delay(1000);
                 uint32_t tag, est_timeout;
                 int result = sendRequest(*curr_telemetry, REQ_TYPE_GET_TELEMETRY_DATA, tag, est_timeout);
-                if (dbg) Serial.printf("Telemetry read %s, tag=%08X, result=%um to=%u | %u/%u\n",
+                if (debugPrint()) Serial.printf("Telemetry read %s, tag=%08X, result=%um to=%u | %u/%u\n",
                     curr_telemetry->name,
                     tag,
                     result,
@@ -1117,7 +1269,7 @@ protected:
                     }
                 } else if (rule->next < now) {
                     rule->next = now + rule->interval;
-                    if (dbg) Serial.printf("Schedule %u\n", pos);
+                    if (debugPrint()) Serial.printf("Schedule %u\n", pos);
                     telemetryRun(pos);
                     break;
                 }
@@ -1136,7 +1288,7 @@ protected:
     }
 
     void onSendTimeout() override {
-        if (dbg) Serial.println("   ERROR: timed out, no ACK.");
+        if (debugPrint()) Serial.println("   ERROR: timed out, no ACK.");
     }
 
 public:
@@ -1667,14 +1819,6 @@ public:
                 }
                 saveLogPrefs();
                 Serial.println("  OK");
-            } else if (memcmp(config, "raw ", 4) == 0) {
-                if (config[4] == 'y') {
-                _logp.doraw = 1;
-                } else {
-                _logp.doraw = 0;
-                }
-                saveLogPrefs();
-                Serial.println("  OK");
             } else if (memcmp(config, "usbraw ", 7) == 0) {
                 if (config[7] == 'y') {
                 _logp.usbraw = 1;
@@ -1692,6 +1836,7 @@ public:
                 saveLogPrefs();
                 Serial.println("  OK");
             } else if (memcmp(config, "web ", 4) == 0) {
+#ifdef WEBSERVER_ENABLE
                 if (config[4] == 'y' || config[4] == '1') {
                 Serial.println("Website enabled");
                 _logp.web = 1;
@@ -1699,16 +1844,17 @@ public:
                 Serial.println("Website disabled");
                 _logp.web = 0;
                 }
-                Serial.println("Reboot to apply");
                 saveLogPrefs();
-                Serial.println("  OK");
+                Serial.println("Reboot to apply");
+#else
+                Serial.println("Webserver not enabled in this build.");
+#endif
             } else {
                 char sender[(PUB_KEY_SIZE * 2) + 1];
                 mesh::Utils::toHex(sender, self_id.pub_key, PUB_KEY_SIZE);
                 Serial.printf("  Log url:     %s\n", _logp.url);
                 Serial.printf("  Self-report: %u\n", _logp.selfreport);
                 Serial.printf("  Pub Key:     %s\n", sender);
-                Serial.printf("  Raw:         %u\n", _logp.doraw);
                 Serial.printf("  Fwd:         %u\n", _logp.dofwd);
                 Serial.printf("  Web:         %u\n", _logp.web);
                 Serial.printf("  USB Raw      %u\n", _logp.usbraw);
@@ -1753,20 +1899,15 @@ public:
             const char* action = &command[4];
             if (memcmp(action, "ls", 2) == 0) {
                 uint32_t now = getRTCClock()->getCurrentTime();
-                Serial.println("ID | Name                 | Pub Key        | Path          | Start | Interval | Next     | L | Password");
+                Serial.println("ID | Name                 | Pub Key        | Path           | Start | Interval | Next     | L | Password");
                 for (int i=0; i<_telemetry.rules.size(); i++) {
                     TelemetryRule* rule = _telemetry.rules[i];
-
-                    // id
-                    Serial.printf("%2d | ", i);
-
-                    // name
+                    char uname[32] = "_unknown_";
                     ContactInfo* c = lookupContactByPubKey(rule->pubkey, rule->key_len);
                     if (c) {
-                        char uname[32];
                         int k = 0;
+                        uname[0] = 0;
                         for (int j=0;j<32;j++) {
-                            uname[k] = 0;
                             char b = c->name[j];
                             if (b == 0) {
                                 break;
@@ -1774,51 +1915,61 @@ public:
                                 uname[k++] = b;
                             }
                         }
-                        Serial.printf("%-20.20s | ", uname);
-                    } else {
-                        Serial.print("_unknown_ | ");
+                        uname[k] = 0;
                     }
 
-                    // key
+                    char key[16];
+                    int key_pos = 0;
                     for (int j=0;j<4;j++) {
                         if (j < rule->key_len) {
-                            Serial.printf("%02X:", rule->pubkey[j]);
+                            key_pos += snprintf(&key[key_pos], sizeof(key) - key_pos, "%02X:", rule->pubkey[j]);
                         } else {
-                            Serial.print("--:");
+                            key_pos += snprintf(&key[key_pos], sizeof(key) - key_pos, "--:");
                         }
                     }
-                    Serial.print(".. | ");
+                    snprintf(&key[key_pos], sizeof(key) - key_pos, "..");
 
-                    // path
+                    char path[16];
                     if (rule->path_len == -1) {
-                        Serial.print("Flood         | ");
+                        snprintf(path, sizeof(path), "Flood");
                     } else {
+                        int path_pos = 0;
                         for (int j = 0; j < 4; j++) {
-                            if (j > 0) Serial.print(j < rule->path_len ? ',' : ' ');
-                            if (j < rule->path_len)
-                                Serial.printf("%02X", rule->path[j]);
-                            else
-                                Serial.print("  ");
+                            if (j > 0) {
+                                path[path_pos++] = j < rule->path_len ? ',' : ' ';
+                            }
+                            if (j < rule->path_len) {
+                                path_pos += snprintf(&path[path_pos], sizeof(path) - path_pos, "%02X", rule->path[j]);
+                            } else {
+                                path[path_pos++] = ' ';
+                                path[path_pos++] = ' ';
+                            }
                         }
 
                         if (rule->path_len == 5) {
-                            Serial.printf(",%02X", rule->path[4]);
+                            snprintf(&path[path_pos], sizeof(path) - path_pos, ",%02X", rule->path[4]);
                         } else if (rule->path_len > 5) {
-                            Serial.print(".. | ");
+                            snprintf(&path[path_pos], sizeof(path) - path_pos, "..");
                         } else {
-                            Serial.print("   | ");
+                            snprintf(&path[path_pos], sizeof(path) - path_pos, "   ");
                         }
                     }
 
-                    // timing
                     uint32_t eta =  rule->next - now;
-                    Serial.printf("%-5d | %-8d | %-8d | %c | %s\n",
-                        rule->start,
-                        rule->interval,
-                        eta,
+                    char line[128];
+                    snprintf(line, sizeof(line), "%2d | %-20.20s | %-14s | %-14s | %-5u | %-8u | %-8u | %c | %s",
+                        i,
+                        uname,
+                        key,
+                        path,
+                        (unsigned)rule->start,
+                        (unsigned)rule->interval,
+                        (unsigned)eta,
                         rule->loggedin ? 'Y' : 'n',
                         rule->password
                     );
+                    Serial.println(line);
+                    Serial.flush();
                 }
             } else if (memcmp(action, "run ", 4) == 0) {
                 const char* idstr = &action[4];
@@ -1962,42 +2113,41 @@ public:
                 ContactInfo c;
                 int i = 0;
 
-                uint32_t curr = getRTCClock()->getCurrentTime();
-
-                Serial.println("ID | Name                s | Pub Key        | Type | Last mod");
+                Serial.println("ID | Name                 | Pub Key        | Type | Last mod");
                 while (iter.hasNext(this, c)) {
-                Serial.printf("%2d | ", i);
-                i++;
-
-                Serial.printf("%-20.20s | ", c.name);
-
+                    char key[16];
+                    int key_pos = 0;
                 for (int j=0;j<4;j++) {
-                    Serial.printf("%02X:", c.id.pub_key[j]);
+                        key_pos += snprintf(&key[key_pos], sizeof(key) - key_pos, "%02X:", c.id.pub_key[j]);
                 }
+                    snprintf(&key[key_pos], sizeof(key) - key_pos, "..");
 
-                Serial.print(".. | ");
-
+                    const char* type = "unkn";
                 if (c.type == ADV_TYPE_NONE) {
-                    Serial.print("None");
+                        type = "None";
                 } else if (c.type == ADV_TYPE_CHAT) {
-                    Serial.print("Chat");
+                        type = "Chat";
                 } else if (c.type == ADV_TYPE_REPEATER) {
-                    Serial.print("Rept");
+                        type = "Rept";
                 } else if (c.type == ADV_TYPE_ROOM) {
-                    Serial.print("Room");
+                        type = "Room";
                 } else if (c.type == ADV_TYPE_SENSOR) {
-                    Serial.print("Sens");
-                } else {
-                    Serial.print("unkn");
+                        type = "Sens";
                 }
 
-                Serial.print(" | ");
+                    int32_t secs = c.lastmod;
 
-                char tmp[40];
-                int32_t secs = c.lastmod;;
-                AdvertTimeHelper::formatRelativeTimeDiff(tmp, secs, false);
-                Serial.println(secs);
-
+                    char line[96];
+                    snprintf(line, sizeof(line), "%2d | %-20.20s | %-14s | %-4s | %ld",
+                        i,
+                        c.name,
+                        key,
+                        type,
+                        (long)secs
+                    );
+                    Serial.println(line);
+                    Serial.flush();
+                    i++;
                 }
             } else if (memcmp(action, "rm", 2) == 0) {
                 const char* idstr = &action[3];
@@ -2052,10 +2202,6 @@ public:
                     }
                 }
             }
-        } else if (memcmp(command, "dbg", 3) == 0) {
-            dbg = !dbg;
-            Serial.print("  Debug ");
-            Serial.println(dbg ? "ON" : "OFF");
         } else if (memcmp(command, "help", 4) == 0) {
             Serial.println("Commands:");
             Serial.println("   set {name|lat|lon|freq|tx|af} {value}");
@@ -2101,6 +2247,7 @@ public:
         BaseChatMesh::loop();
         getRTCClock()->tick();
         telemetryLoop();
+        flushScheduledContactsSave();
 
         int len = strlen(command);
         while (Serial.available() && len < sizeof(command)-1) {
