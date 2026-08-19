@@ -1,0 +1,62 @@
+name: Provenance-checked development firmware
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PLATFORMIO_CORE_VERSION: 6.1.18
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install pinned PlatformIO Core
+        run: python -m pip install --disable-pip-version-check "platformio==$PLATFORMIO_CORE_VERSION"
+      - name: Test packaging behavior
+        run: python -m unittest discover -s tests -v
+      - name: Set candidate identity and source timestamp
+        run: |
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_VERSION=1.5.0-dev.${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - name: Build all checked board environments
+        run: |
+          set -euxo pipefail
+          for environment in \
+            Generic_E22_meshlog \
+            Heltec_lora32_v3_meshlog \
+            Heltec_v4_meshlog \
+            LilyGo_T3S3_meshlog \
+            LilyGo_TLora_v2_1_meshlog \
+            Xiao_S3_meshlog
+          do
+            pio run --environment "$environment" --target mergebin
+          done
+      - name: Package unvalidated build outputs
+        run: |
+          python scripts/package_release.py \
+            --version "$BUILD_VERSION" \
+            --commit "$GITHUB_SHA" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH" \
+            --output dist
+          (cd dist && sha256sum --check SHA256SUMS)
+      - name: Upload development artifacts (not a release)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: UNVALIDATED-meshlog-berks-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
