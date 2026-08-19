@@ -15,7 +15,7 @@ All board environments inherit this profile from `platformio.ini`:
 | Spreading factor | **8** |
 | Coding rate | **4/8** (`LORA_CR=8`) |
 
-The firmware retains upstream's built-in `Public` channel. Its PSK is embedded in public source code and is a shared interoperability value, **not** a confidential credential or proof of identity. A proposed patch that appended `#berks`, `#berksbot`, and `#jokes` at every boot is intentionally omitted from this release preparation: the current channel API does not establish that doing so can preserve a full or customized persisted channel list. Add those public/community channels through the CLI after commissioning until a separately reviewed migration exists. Confirm that this radio profile is legal for the operating location and hardware before transmitting.
+Firmware built from the BerksMesh release branch includes `Public`, `#berks`, `#berksbot`, and `#jokes`. Their PSKs are embedded in public source code and are shared interoperability values, **not** confidential credentials or proof of identity. These defaults occupy slots 0–3 on a freshly erased logger; verify them with `channel ls` during physical release testing. Confirm that this radio profile is legal for the operating location and hardware before transmitting.
 
 ## Configured build targets
 

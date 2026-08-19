@@ -15,7 +15,7 @@ Compilation, unit tests, or a boot reported by somebody else are not substitutes
 
 ## Candidate procedure
 
-1. Start from a reviewed `dev` commit. Fetch `upstream/main` and inspect both commit and path divergence. Do not reapply the proposed boot-time BerksMesh channel append unless a reviewed migration proves that persisted user channels (including a full store) cannot be overwritten or displaced. Never resolve `MyMesh.h` conflicts by taking an entire side.
+1. Build BerksMesh candidates from the reviewed `berksmesh` branch, not `dev`; `berksmesh` carries the built-in `#berks`, `#berksbot`, and `#jokes` channels. Merge reviewed current changes into that branch deliberately, fetch `upstream/main`, and inspect both commit and path divergence. Never resolve `MyMesh.h` conflicts by taking an entire side.
 2. Confirm the radio flags remain exactly 869.618 MHz, 62.5 kHz, SF8, CR 4/8. Review every dependency/platform version change.
 3. Choose a commit-unique version and build once from a clean checkout using the commands in `README.md`. Use the commit timestamp as `SOURCE_DATE_EPOCH`. Confirm every per-environment provenance marker contains the exact full `HEAD`, epoch, and clean-tree assertion.
 4. Run the unit tests, all six PlatformIO builds, packaging, and `sha256sum --check SHA256SUMS`. Confirm `SHA256SUMS` covers `manifest.json` and keep the complete logs. Use a new output path; candidate directories are immutable.
@@ -27,7 +27,7 @@ Compilation, unit tests, or a boot reported by somebody else are not substitutes
    - configuration save/load across reboot;
    - Wi-Fi association and reconnect;
    - HTTPS logger submission and authentication behavior;
-   - expected channels; the built-in `Public` PSK is public/shared, while any private/community PSK must not be exposed in logs;
+   - `channel ls` shows `Public`, `#berks`, `#berksbot`, and `#jokes` in slots 0–3; their embedded PSKs are public/shared interoperability values, while any private channel PSK must not be exposed in logs;
    - bidirectional packets with a known-good BerksMesh node using 869.618 MHz / 62.5 kHz / SF8 / CR 4/8;
    - a sustained run appropriate to the release risk, checking watchdog resets and message delivery.
 8. Have the reviewer verify the physical evidence, manifest metadata, and checksums. Only after the project owner explicitly confirms every included target and authorizes publication may the owner create a `v*` tag. The guarded tag workflow rebuilds the exact tagged source, packages it as `VALIDATED`, checks every checksum, and publishes the immutable release assets.
