@@ -57,6 +57,24 @@ class PackageReleaseTests(unittest.TestCase):
             self.assertIn(f"{item['sha256']}  {item['filename']}\n", sums)
         self.assertIn(f"{sha256(output / 'manifest.json')}  manifest.json\n", sums)
 
+    def test_validated_release_is_explicitly_marked(self):
+        output = self.root / "validated"
+        manifest = package(
+            self.build, output, "1.5.0-berks.1", COMMIT, EPOCH,
+            release_status="VALIDATED",
+        )
+        self.assertEqual(manifest["release_status"], "VALIDATED")
+        self.assertIn("Hardware-validated", manifest["warning"])
+        written = json.loads((output / "manifest.json").read_text())
+        self.assertEqual(written["release_status"], "VALIDATED")
+
+    def test_invalid_release_status_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "release status"):
+            package(
+                self.build, self.root / "invalid-status", "1.5.0", COMMIT,
+                EPOCH, release_status="UNKNOWN",
+            )
+
     def test_existing_output_is_never_replaced_or_deleted(self):
         output = self.root / "candidate"
         output.mkdir()

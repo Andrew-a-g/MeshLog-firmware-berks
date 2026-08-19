@@ -1,6 +1,6 @@
 # Release and validation policy
 
-This repository prepares firmware for release; it does not make an artifact safe merely by compiling it. CI artifacts are temporary, explicitly `UNVALIDATED`, and must not be linked as supported downloads.
+The repository distinguishes short-lived development artifacts from tagged releases. CI artifacts remain explicitly `UNVALIDATED` and must not be linked as supported downloads. A tagged release may be marked `VALIDATED` only after the project owner has explicitly confirmed physical operation of every included target and authorized publication.
 
 ## Roles and evidence
 
@@ -30,8 +30,8 @@ Compilation, unit tests, or a boot reported by somebody else are not substitutes
    - expected channels; the built-in `Public` PSK is public/shared, while any private/community PSK must not be exposed in logs;
    - bidirectional packets with a known-good BerksMesh node using 869.618 MHz / 62.5 kHz / SF8 / CR 4/8;
    - a sustained run appropriate to the release risk, checking watchdog resets and message delivery.
-8. Have the reviewer verify the physical evidence, manifest metadata, and checksums. Only then may the owner replace `UNVALIDATED` status as part of a separately reviewed release change and create a draft release.
-9. A human publishes only after reviewing the draft text and confirming every attached file. Automation in this repository must not publish releases.
+8. Have the reviewer verify the physical evidence, manifest metadata, and checksums. Only after the project owner explicitly confirms every included target and authorizes publication may the owner create a `v*` tag. The guarded tag workflow rebuilds the exact tagged source, packages it as `VALIDATED`, checks every checksum, and publishes the immutable release assets.
+9. Read back the published release, asset list, manifest and checksums. If any expected target or file is absent, remove the release and issue a corrected new version rather than replacing files in place.
 
 ## Release notes and downloads
 
@@ -45,7 +45,7 @@ Release notes must distinguish configured targets, successfully compiled targets
 - SHA-256 verification instructions;
 - that only artifacts with recorded physical validation are supported.
 
-Do not call workflow artifacts “releases,” “stable,” or “hardware tested.” Do not put them on a downloads page. No browser flasher should be added until board detection, erase/backup expectations, recovery, and physical tests have their own reviewed design.
+Do not call ordinary workflow artifacts “releases,” “stable,” or “hardware tested,” and do not put them on a downloads page. Only immutable assets from a `VALIDATED` tagged release may be linked as supported downloads. No browser flasher should be added until board detection, erase/backup expectations, recovery, and physical tests have their own reviewed design.
 
 ## Rollback and incident response
 

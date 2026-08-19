@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [dev]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -54,9 +55,76 @@ jobs:
             --output dist
           (cd dist && sha256sum --check SHA256SUMS)
       - name: Upload development artifacts (not a release)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: UNVALIDATED-meshlog-berks-${{ github.sha }}
           path: dist/
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      PLATFORMIO_CORE_VERSION: 6.1.18
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install pinned PlatformIO Core
+        run: python -m pip install --disable-pip-version-check "platformio==$PLATFORMIO_CORE_VERSION"
+      - name: Test packaging behavior
+        run: python -m unittest discover -s tests -v
+      - name: Set release identity and source timestamp
+        run: |
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Build all validated board environments
+        run: |
+          set -euxo pipefail
+          for environment in \
+            Generic_E22_meshlog \
+            Heltec_lora32_v3_meshlog \
+            Heltec_v4_meshlog \
+            LilyGo_T3S3_meshlog \
+            LilyGo_TLora_v2_1_meshlog \
+            Xiao_S3_meshlog
+          do
+            pio run --environment "$environment" --target mergebin
+          done
+      - name: Package validated release outputs
+        run: |
+          python scripts/package_release.py \
+            --version "$RELEASE_VERSION" \
+            --commit "$GITHUB_SHA" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH" \
+            --release-status VALIDATED \
+            --output dist
+          (cd dist && sha256sum --check SHA256SUMS)
+      - name: Publish validated GitHub release
+        run: |
+          cat > release-notes.md <<EOF
+          Validated BerksMesh MeshLog firmware for the six supported logger targets.
+
+          Physical operation of every listed board target was confirmed by the project owner on 2026-08-19. The release was rebuilt from tagged commit \`${GITHUB_SHA}\`; exact filenames and SHA-256 checksums are recorded in \`manifest.json\` and \`SHA256SUMS\`.
+
+          Radio profile: 869.618 MHz, 62.5 kHz bandwidth, SF8, coding rate 4/8.
+
+          Download only the merged image whose board name exactly matches the hardware, verify it with \`SHA256SUMS\`, and flash it at offset \`0x0\`. Flashing erases the existing configuration and identity; preserve any required identity through an already secured backup before erasing.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "BerksMesh MeshLog ${RELEASE_VERSION}" \
+            --notes-file release-notes.md

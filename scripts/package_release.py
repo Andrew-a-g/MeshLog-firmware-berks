@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an explicitly unvalidated firmware candidate with verified provenance."""
+"""Create a provenance-checked firmware candidate or validated release package."""
 
 from __future__ import annotations
 
@@ -79,6 +79,7 @@ def package(
     commit: str,
     epoch: int,
     repo_root: Path | None = None,
+    release_status: str = "UNVALIDATED",
 ) -> dict:
     if not re.fullmatch(r"[0-9A-Fa-f]{40}", commit):
         raise ValueError("commit must be the full 40-character hexadecimal Git commit")
@@ -86,6 +87,8 @@ def package(
         raise ValueError("version contains unsupported characters")
     if epoch < 0:
         raise ValueError("source date epoch must not be negative")
+    if release_status not in {"UNVALIDATED", "VALIDATED"}:
+        raise ValueError("release status must be UNVALIDATED or VALIDATED")
     if repo_root is not None:
         validate_repository(repo_root, commit)
 
@@ -134,8 +137,12 @@ def package(
             "source_date_epoch": epoch,
             "source_tree_clean": True,
             "created_at": datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace("+00:00", "Z"),
-            "release_status": "UNVALIDATED",
-            "warning": "Development candidate only. Compilation does not establish physical-board or operational support.",
+            "release_status": release_status,
+            "warning": (
+                "Hardware-validated BerksMesh release. Flash only the image matching the exact board model."
+                if release_status == "VALIDATED"
+                else "Development candidate only. Compilation does not establish physical-board or operational support."
+            ),
             "radio_profile": {"frequency_mhz": 869.618, "bandwidth_khz": 62.5, "spreading_factor": 8, "coding_rate": "4/8"},
             "files": files,
         }
@@ -162,10 +169,14 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--source-date-epoch", required=True, type=int)
+    parser.add_argument(
+        "--release-status", choices=("UNVALIDATED", "VALIDATED"),
+        default="UNVALIDATED",
+    )
     args = parser.parse_args()
     package(
         args.build_root, args.output, args.version, args.commit,
-        args.source_date_epoch, args.repo_root,
+        args.source_date_epoch, args.repo_root, args.release_status,
     )
 
 

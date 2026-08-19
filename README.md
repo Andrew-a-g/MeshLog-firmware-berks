@@ -2,7 +2,7 @@
 
 Firmware for a [MeshCore logger](https://github.com/Anrijs/MeshLog), maintained as a BerksMesh-specific fork.
 
-> **Development status:** CI artifacts and locally packaged binaries are **unvalidated development outputs**, not supported downloads. Do not publish or recommend a binary until its exact checksum has passed the physical checks in [the release policy](docs/RELEASING.md).
+> **Release status:** use the assets attached to the latest tagged GitHub Release for supported, hardware-validated downloads. Ordinary CI artifacts remain **unvalidated development outputs** and must not be recommended.
 
 ## BerksMesh radio profile
 
