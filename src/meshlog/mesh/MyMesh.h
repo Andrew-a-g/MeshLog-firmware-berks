@@ -18,7 +18,6 @@
 #include "../utils.h"
 #include "../version.h"
 
-#define MESHLOG_VERSION 2
 
 #define TELEMETRY_VERSION 1
 #define TELEMETRY_MAX_RULES 16
@@ -610,7 +609,11 @@ protected:
         if (stats.last == 0) stats.last = millis();
     }
 
-    void reportRaw(mesh::Packet* pkt) {
+    mesh::DispatcherAction onRecvPacket(mesh::Packet* pkt) override {
+        // process packet
+        rawDecoded = false;
+        mesh::DispatcherAction act = Mesh::onRecvPacket(pkt);
+
         // log raw
         if (_logp.doraw) {
             int phType = (pkt->header >> PH_TYPE_SHIFT) & PH_TYPE_MASK;
@@ -631,63 +634,28 @@ protected:
             uint8_t hash[MAX_HASH_SIZE];
             pkt->calculatePacketHash(hash);
 
-            uint8_t rawData[256];
-            uint8_t rawSize = pkt->writeTo(rawData);
-
             char sender[(PUB_KEY_SIZE * 2) + 1];
-            char strdata[(rawSize * 2) + 1];
+            char payload[(pkt->payload_len * 2) + 1];
             char strhash[MAX_HASH_SIZE * 2 + 1];
 
             mesh::Utils::toHex(sender, self_id.pub_key, PUB_KEY_SIZE);
-            mesh::Utils::toHex(strdata, rawData, rawSize);
+            mesh::Utils::toHex(payload, pkt->payload, pkt->payload_len);
             mesh::Utils::toHex(strhash, hash, MAX_HASH_SIZE);
 
             JsonDocument doc;
-            doc["version"] = MESHLOG_VERSION;
+            doc["version"] = 1;
             doc["type"] = "RAW";
             doc["reporter"] = sender;
             doc["time"]["local"] = getRTCClock()->getCurrentTime();
-            doc["packet"]["raw"] = strdata;
+            doc["packet"]["header"] = pkt->header;
+            doc["packet"]["path"] = getPath(pkt);
+            doc["packet"]["payload"] = payload;
             doc["packet"]["snr"] = pkt->getSNR();
+            doc["packet"]["hash_size"] = pkt->getPathHashSize();
+            doc["packet"]["decoded"] = rawDecoded ? 1 : 0;
             messageQueue.push(doc);
         }
-    }
 
-    mesh::DispatcherAction onRecvPacket(mesh::Packet* pkt) override {
-        // process packet
-        rawDecoded = false;
-        mesh::DispatcherAction act = Mesh::onRecvPacket(pkt);
-
-        // log packet
-        reportRaw(pkt);
-
-        String rtype = "unknown";
-        String ptype = "unknown";
-
-        switch (pkt->getRouteType()) {
-            case ROUTE_TYPE_TRANSPORT_FLOOD: rtype = "transport-flood"; break;
-            case ROUTE_TYPE_FLOOD: rtype = "flood"; break;
-            case ROUTE_TYPE_DIRECT: rtype = "direct"; break;
-            case ROUTE_TYPE_TRANSPORT_DIRECT: rtype = "transport-direct"; break;
-        }
-
-        switch (pkt->getPayloadType()) {
-            case PAYLOAD_TYPE_REQ: ptype = "req"; break;
-            case PAYLOAD_TYPE_RESPONSE: ptype = "response"; break;
-            case PAYLOAD_TYPE_TXT_MSG: ptype = "txt-msg"; break;
-            case PAYLOAD_TYPE_ACK: ptype = "ack"; break;
-            case PAYLOAD_TYPE_ADVERT: ptype = "advert"; break;
-            case PAYLOAD_TYPE_GRP_TXT: ptype = "grp-txt"; break;
-            case PAYLOAD_TYPE_GRP_DATA: ptype = "grp-data"; break;
-            case PAYLOAD_TYPE_ANON_REQ: ptype = "anon-req"; break;
-            case PAYLOAD_TYPE_PATH: ptype = "path"; break;
-            case PAYLOAD_TYPE_TRACE: ptype = "trace"; break;
-            case PAYLOAD_TYPE_MULTIPART: ptype = "multipart"; break;
-            case PAYLOAD_TYPE_CONTROL: ptype = "control"; break;
-            case PAYLOAD_TYPE_RAW_CUSTOM: ptype = "raw-custom"; break;
-        }
-
-        Serial.printf("Received packet: len=%u, type=%s, route_type=%s\n", pkt->payload_len, ptype.c_str(), rtype.c_str());
         return act;
     }
 
@@ -725,7 +693,7 @@ protected:
         mesh::Utils::toHex(strhash, hash, MAX_HASH_SIZE);
 
         JsonDocument doc;
-        doc["version"] = MESHLOG_VERSION;
+        doc["version"] = 1;
         doc["type"] = "ADV";
         doc["reporter"] = sender;
         doc["hash"] = strhash;
@@ -862,7 +830,7 @@ protected:
         mesh::Utils::toHex(strhash, hash, MAX_HASH_SIZE);
 
         JsonDocument doc;
-        doc["version"] = MESHLOG_VERSION;
+        doc["version"] = 1;
         doc["type"] = "MSG";
         doc["reporter"] = sender;
         doc["hash"] = strhash;
@@ -931,7 +899,7 @@ protected:
         mesh::Utils::toHex(strhash, hash, MAX_HASH_SIZE);
 
         JsonDocument doc;
-        doc["version"] = MESHLOG_VERSION;
+        doc["version"] = 1;
         doc["type"] = "PUB";
         doc["reporter"] = sender;
         doc["hash"] = strhash;
@@ -1106,7 +1074,7 @@ protected:
             mesh::Utils::toHex(sender, self_id.pub_key, PUB_KEY_SIZE);
 
             JsonDocument doc;
-            doc["version"] = MESHLOG_VERSION;
+            doc["version"] = 1;
             doc["type"] = "TEL";
             doc["reporter"] = sender;
             doc["telemetry"] = JsonArray();
