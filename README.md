@@ -24,13 +24,12 @@ These PlatformIO environments are configured and included in the candidate matri
 | Hardware | Environment |
 |---|---|
 | Generic E22 (ESP32) | `Generic_E22_meshlog` |
+| Heltec WiFi LoRa 32 V2 | `Heltec_v2_meshlog` |
 | Heltec WiFi LoRa 32 V3 | `Heltec_lora32_v3_meshlog` |
 | Heltec WiFi LoRa 32 V4 | `Heltec_v4_meshlog` |
 | LilyGo T3-S3 | `LilyGo_T3S3_meshlog` |
 | LilyGo T-LoRa V2.1 | `LilyGo_TLora_v2_1_meshlog` |
 | Seeed XIAO ESP32-S3 + Wio-SX1262 | `Xiao_S3_meshlog` |
-
-Heltec V2 work exists separately on the local assessment branch and is deliberately not in the release matrix because it has not been accepted or physically validated.
 
 ## Development candidate build
 
@@ -41,16 +40,16 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install platformio==6.1.18
 export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
-pio run -e Heltec_lora32_v3_meshlog -t mergebin
+pio run -e Heltec_v2_meshlog -t mergebin
 ```
 
-`SOURCE_DATE_EPOCH` reduces time-derived variation in compiler strings, and direct dependencies/platforms are pinned in `platformio.ini`. These controls improve repeatability but do not guarantee bit-for-bit reproducibility across hosts or transitive tool changes. The PlatformIO pre-script refuses a dirty tree and records the full `HEAD`, environment, and epoch beside every build. A merged image is written to `.pio/build/<environment>/firmware-merged.bin`. Build all six environments before packaging.
+`SOURCE_DATE_EPOCH` reduces time-derived variation in compiler strings, and direct dependencies/platforms are pinned in `platformio.ini`. These controls improve repeatability but do not guarantee bit-for-bit reproducibility across hosts or transitive tool changes. The PlatformIO pre-script refuses a dirty tree and records the full `HEAD`, environment, and epoch beside every build. A merged image is written to `.pio/build/<environment>/firmware-merged.bin`. Build all seven environments before packaging.
 
 Run tests and package the existing build outputs:
 
 ```sh
 python -m unittest discover -s tests -v
-for env in Generic_E22_meshlog Heltec_lora32_v3_meshlog Heltec_v4_meshlog \
+for env in Generic_E22_meshlog Heltec_v2_meshlog Heltec_lora32_v3_meshlog Heltec_v4_meshlog \
   LilyGo_T3S3_meshlog LilyGo_TLora_v2_1_meshlog Xiao_S3_meshlog; do
   pio run -e "$env" -t mergebin
 done

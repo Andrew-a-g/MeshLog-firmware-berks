@@ -16,6 +16,7 @@ from pathlib import Path
 
 BOARDS = (
     ("generic-e22", "Generic E22 (ESP32)", "Generic_E22_meshlog"),
+    ("heltec-v2", "Heltec WiFi LoRa 32 V2", "Heltec_v2_meshlog"),
     ("heltec-v3", "Heltec WiFi LoRa 32 V3", "Heltec_lora32_v3_meshlog"),
     ("heltec-v4", "Heltec WiFi LoRa 32 V4", "Heltec_v4_meshlog"),
     ("lilygo-t3s3", "LilyGo T3-S3", "LilyGo_T3S3_meshlog"),

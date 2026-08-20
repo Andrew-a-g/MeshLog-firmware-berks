@@ -3,7 +3,7 @@ name: Provenance-checked development firmware
 on:
   pull_request:
   push:
-    branches: [dev]
+    branches: [dev, berksmesh]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -38,6 +38,7 @@ jobs:
           set -euxo pipefail
           for environment in \
             Generic_E22_meshlog \
+            Heltec_v2_meshlog \
             Heltec_lora32_v3_meshlog \
             Heltec_v4_meshlog \
             LilyGo_T3S3_meshlog \
@@ -95,6 +96,7 @@ jobs:
           set -euxo pipefail
           for environment in \
             Generic_E22_meshlog \
+            Heltec_v2_meshlog \
             Heltec_lora32_v3_meshlog \
             Heltec_v4_meshlog \
             LilyGo_T3S3_meshlog \
@@ -115,9 +117,9 @@ jobs:
       - name: Publish validated GitHub release
         run: |
           cat > release-notes.md <<EOF
-          Validated BerksMesh MeshLog firmware for the six supported logger targets.
+          Validated BerksMesh MeshLog firmware for the seven supported logger targets.
 
-          Physical operation of every listed board target was confirmed by the project owner on 2026-08-19. The release was rebuilt from tagged commit \`${GITHUB_SHA}\`; exact filenames and SHA-256 checksums are recorded in \`manifest.json\` and \`SHA256SUMS\`.
+          Physical operation of the listed board targets was confirmed by the project owner during hardware validation on 2026-08-19 and 2026-08-20. The release was rebuilt from tagged commit \`${GITHUB_SHA}\`; exact filenames and SHA-256 checksums are recorded in \`manifest.json\` and \`SHA256SUMS\`.
 
           Radio profile: 869.618 MHz, 62.5 kHz bandwidth, SF8, coding rate 4/8.
 
