@@ -72,7 +72,7 @@ export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
 pio run -e Heltec_v2_meshlog -t mergebin
 ```
 
-`SOURCE_DATE_EPOCH` reduces time-derived variation in compiler strings, and direct dependencies/platforms are pinned in `platformio.ini`. These controls improve repeatability but do not guarantee bit-for-bit reproducibility across hosts or transitive tool changes. The PlatformIO pre-script refuses a dirty tree and records the full `HEAD`, environment, and epoch beside every build. A merged image is written to `.pio/build/<environment>/firmware-merged.bin`. Build all eight environments before packaging.
+`SOURCE_DATE_EPOCH` reduces time-derived variation in compiler strings, and direct dependencies/platforms are pinned in `platformio.ini`. Melopero RV3028 is pinned to its upstream `1.1.0` Git commit because that registry version is no longer listed; its compiled source files were compared byte-for-byte with the previously installed 1.1.0 package. These controls improve repeatability but do not guarantee bit-for-bit reproducibility across hosts or transitive tool changes. The PlatformIO pre-script refuses a dirty tree and records the full `HEAD`, environment, and epoch beside every build. A merged image is written to `.pio/build/<environment>/firmware-merged.bin`. Build all eight environments before packaging.
 
 Run tests and package the existing build outputs:
 
