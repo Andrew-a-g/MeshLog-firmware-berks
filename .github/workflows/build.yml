@@ -116,12 +116,14 @@ jobs:
             --release-status VALIDATED \
             --output dist
           (cd dist && sha256sum --check SHA256SUMS)
+      - name: Verify rebuilt bytes match owner-approved candidate
+        run: python -m scripts.verify_release_approval --approval docs/owner-validation-wsl-hf.json --manifest dist/manifest.json
       - name: Publish validated GitHub release
         run: |
           cat > release-notes.md <<EOF
           Validated BerksMesh MeshLog firmware for the eight supported logger targets.
 
-          Publish this tag only after the release owner and reviewer have recorded physical validation of the exact artifacts for all eight targets, including HTIT-WSL-HF. The release was rebuilt from tagged commit \`${GITHUB_SHA}\`; exact filenames and SHA-256 checksums are recorded in \`manifest.json\` and \`SHA256SUMS\`. See the linked per-artifact physical test record for tester, date, and results.
+          Project owner Andrew attested that all eight exact candidate images, including HTIT-WSL-HF, were validated and authorized this release. The tag workflow verified each rebuilt image against the owner-approved SHA-256 values in \`docs/owner-validation-wsl-hf.json\`. Detailed per-board tester identities, hardware revisions and test dates were not supplied; this is an owner attestation, not an independently documented hardware test. The release was rebuilt from tagged commit \`${GITHUB_SHA}\`; exact filenames and checksums are in \`manifest.json\` and \`SHA256SUMS\`.
 
           Radio profile: 869.618 MHz, 62.5 kHz bandwidth, SF8, coding rate 4/8.
 

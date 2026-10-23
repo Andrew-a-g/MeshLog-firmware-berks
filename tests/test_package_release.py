@@ -11,6 +11,7 @@ from scripts.package_release import (
     sha256,
     validate_repository,
 )
+from scripts.verify_release_approval import verify
 
 
 COMMIT = "abcdef0123456789abcdef0123456789abcdef01"
@@ -67,6 +68,19 @@ class PackageReleaseTests(unittest.TestCase):
         self.assertIn("Hardware-validated", manifest["warning"])
         written = json.loads((output / "manifest.json").read_text())
         self.assertEqual(written["release_status"], "VALIDATED")
+
+    def test_tagged_release_requires_exact_owner_approved_image_bytes(self):
+        output = self.root / "approved"
+        manifest = package(self.build, output, "1.5.0-berks.5", COMMIT, EPOCH,
+                           release_status="VALIDATED")
+        approval = self.root / "owner-approval.json"
+        approved = {item["environment"]: item["sha256"] for item in manifest["files"]}
+        approval.write_text(json.dumps({"approved_sha256_by_environment": approved}))
+        verify(approval, output / "manifest.json")
+        approved[BOARDS[-1][2]] = "0" * 64
+        approval.write_text(json.dumps({"approved_sha256_by_environment": approved}))
+        with self.assertRaisesRegex(ValueError, "rebuilt image differs"):
+            verify(approval, output / "manifest.json")
 
     def test_invalid_release_status_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "release status"):

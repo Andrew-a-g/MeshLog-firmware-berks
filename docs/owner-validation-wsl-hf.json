@@ -1,0 +1,15 @@
+{
+  "candidate_commit": "e7a7db2facb89f60b7537bf0476a97eda13e11d2",
+  "owner_attestation": "Andrew explicitly confirmed that all eight exact images in this candidate are validated and authorized publication. Individual tester identities, board revisions, test dates, and detailed physical test records were not supplied.",
+  "attestation_date_utc": "2026-10-23",
+  "approved_sha256_by_environment": {
+    "Generic_E22_meshlog": "844dd5f7d84c26119edb557d91478d6af17543f534f5ab0a29acf9994f9b5d35",
+    "Heltec_v2_meshlog": "6ab2c50d82b18a1fc08a0521bdd6432aab439633dc80f5e6866c7ea5d38b96fd",
+    "Heltec_lora32_v3_meshlog": "147457443755dae797b2c702b17c7aa1366054878496e9722529eeb28ecb7137",
+    "Heltec_wireless_stick_lite_v3_meshlog": "aae5018f8afc0248a158f557d7fa3c3ad6b2c15257c646d587e5edcfbd2bfb66",
+    "Heltec_v4_meshlog": "a6557885da123a673cc5d8f0cc495166d38a3e87a4ba80306ae0ded40244b017",
+    "LilyGo_T3S3_meshlog": "38cdb12619e43c893ddba695f3018327efcc71ed0c604f7831abeace5c2712b5",
+    "LilyGo_TLora_v2_1_meshlog": "913ea1fbe70a2bc0a051f5c474382b586e7cb1e7975a8c091d117a48d40c3880",
+    "Xiao_S3_meshlog": "5842a5e61f74506f7d1d311fd07a079c3a93468b2139648a6fd5468d6a5b2a8e"
+  }
+}
