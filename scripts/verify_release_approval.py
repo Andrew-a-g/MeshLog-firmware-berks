@@ -12,6 +12,8 @@ from scripts.package_release import BOARDS, sha256
 def verify(approval_path: Path, manifest_path: Path) -> None:
     approval = json.loads(approval_path.read_text(encoding="utf-8"))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest["source_date_epoch"] != approval["candidate_source_date_epoch"]:
+        raise ValueError("release build epoch differs from the approved candidate")
     approved = approval["approved_sha256_by_environment"]
     environments = {environment for _, _, environment in BOARDS}
     if set(approved) != environments:

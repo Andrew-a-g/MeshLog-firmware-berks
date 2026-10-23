@@ -1,5 +1,6 @@
 {
   "candidate_commit": "e7a7db2facb89f60b7537bf0476a97eda13e11d2",
+  "candidate_source_date_epoch": 1792779295,
   "owner_attestation": "Andrew explicitly confirmed that all eight exact images in this candidate are validated and authorized publication. Individual tester identities, board revisions, test dates, and detailed physical test records were not supplied.",
   "attestation_date_utc": "2026-10-23",
   "approved_sha256_by_environment": {

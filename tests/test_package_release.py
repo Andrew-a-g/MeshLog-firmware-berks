@@ -75,10 +75,12 @@ class PackageReleaseTests(unittest.TestCase):
                            release_status="VALIDATED")
         approval = self.root / "owner-approval.json"
         approved = {item["environment"]: item["sha256"] for item in manifest["files"]}
-        approval.write_text(json.dumps({"approved_sha256_by_environment": approved}))
+        approval.write_text(json.dumps({"approved_sha256_by_environment": approved,
+                                        "candidate_source_date_epoch": EPOCH}))
         verify(approval, output / "manifest.json")
         approved[BOARDS[-1][2]] = "0" * 64
-        approval.write_text(json.dumps({"approved_sha256_by_environment": approved}))
+        approval.write_text(json.dumps({"approved_sha256_by_environment": approved,
+                                        "candidate_source_date_epoch": EPOCH}))
         with self.assertRaisesRegex(ValueError, "rebuilt image differs"):
             verify(approval, output / "manifest.json")
 
