@@ -13,6 +13,8 @@ A release candidate needs:
 
 Compilation, unit tests, or a boot reported by somebody else are not substitutes for physical validation. Failed or untested boards must be rebuilt after removal from the package matrix, or the entire candidate must remain unpublished.
 
+**Owner-authorized exception for `v1.5.0-berks.5` only:** Andrew attested that all eight exact candidate images identified by SHA-256 in `docs/owner-validation-wsl-hf.json` were validated and explicitly directed publication without supplying the usual per-board tester, revision, and test dates. This exception waives the *record-detail requirement*, not the byte-identity or checksum gate: the tag workflow must refuse publication if any rebuilt image differs. Release notes must disclose the omitted details. Do not infer or claim that a particular test step above was documented; all later releases follow the ordinary evidence policy.
+
 ## Candidate procedure
 
 1. Build BerksMesh candidates from the reviewed `berksmesh` branch, not `dev`; `berksmesh` carries the built-in `#berks`, `#berksbot`, and `#jokes` channels. Merge reviewed current changes into that branch deliberately, fetch `upstream/main`, and inspect both commit and path divergence. Never resolve `MyMesh.h` conflicts by taking an entire side.
