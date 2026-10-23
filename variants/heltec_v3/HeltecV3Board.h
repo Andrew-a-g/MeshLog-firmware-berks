@@ -92,6 +92,10 @@ public:
   }
 
   const char* getManufacturerName() const override {
+#ifdef WIRELESS_STICK_LITE_V3
+    return "Heltec Wireless Stick Lite V3";
+#else
     return "Heltec V3";
+#endif
   }
 };

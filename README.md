@@ -31,6 +31,29 @@ These PlatformIO environments are configured and included in the candidate matri
 | LilyGo T-LoRa V2.1 | `LilyGo_TLora_v2_1_meshlog` |
 | Seeed XIAO ESP32-S3 + Wio-SX1262 | `Xiao_S3_meshlog` |
 
+### Experimental Wireless Stick Lite V3 candidate
+
+The **Heltec Wireless Stick Lite V3** (`HTIT-WSL-HF`, 863–928 MHz) has a separate,
+**unvalidated** build target: `Heltec_wireless_stick_lite_v3_meshlog`. It reuses the
+Heltec V3 ESP32-S3/SX1262 implementation and radio SPI/DIO/BUSY, Vext and battery
+pins, with the Lite's GPIO12 radio reset and its own board identity. It has no OLED.
+This target is **not** in the seven-board release/packaging matrix or the onboarding
+flasher. Compilation alone does not establish radio, Wi-Fi, battery or logger support.
+
+Build a merged development image from a clean, committed checkout:
+
+```sh
+export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+.venv/bin/pio run -e Heltec_wireless_stick_lite_v3_meshlog -t mergebin
+```
+
+The resulting `.pio/build/Heltec_wireless_stick_lite_v3_meshlog/firmware-merged.bin`
+must be renamed to end in `-merged.bin` when distributed for custom flashing. It
+flashes at offset `0x0` and **erases the existing identity and configuration**.
+Verify boot/serial CLI, `get public.key`, `channel ls`, reception/transmission with
+a known-good node, Wi-Fi upload, battery reading, reboot and sustained operation on
+the exact Lite V3 hardware before considering a release or web-flasher entry.
+
 ## Development candidate build
 
 Use Python 3.11 and the same pinned PlatformIO Core as CI:
