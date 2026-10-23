@@ -12,6 +12,7 @@ from scripts.package_release import (
     validate_repository,
 )
 from scripts.verify_release_approval import verify
+from scripts.package_approved_release import package_approved
 
 
 COMMIT = "abcdef0123456789abcdef0123456789abcdef01"
@@ -83,6 +84,24 @@ class PackageReleaseTests(unittest.TestCase):
                                         "candidate_source_date_epoch": EPOCH}))
         with self.assertRaisesRegex(ValueError, "rebuilt image differs"):
             verify(approval, output / "manifest.json")
+
+    def test_tagged_release_packages_only_approved_source_images(self):
+        approval = self.root / "approved.json"
+        approved = {environment: sha256(self.build / environment / "firmware-merged.bin")
+                    for _, _, environment in BOARDS}
+        approval.write_text(json.dumps({
+            "candidate_commit": COMMIT,
+            "candidate_source_date_epoch": EPOCH,
+            "approved_sha256_by_environment": approved,
+        }))
+        output = self.root / "owner-release"
+        manifest = package_approved(self.build, approval, output)
+        self.assertEqual(manifest["git_commit"], COMMIT)
+        self.assertEqual(manifest["release_status"], "VALIDATED")
+        verify(approval, output / "manifest.json")
+        (self.build / BOARDS[-1][2] / "firmware-merged.bin").write_bytes(b"tampered")
+        with self.assertRaisesRegex(ValueError, "tracked candidate image"):
+            package_approved(self.build, approval, self.root / "tampered-output")
 
     def test_invalid_release_status_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "release status"):
