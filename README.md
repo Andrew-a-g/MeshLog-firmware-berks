@@ -26,19 +26,25 @@ These PlatformIO environments are configured and included in the candidate matri
 | Generic E22 (ESP32) | `Generic_E22_meshlog` |
 | Heltec WiFi LoRa 32 V2 | `Heltec_v2_meshlog` |
 | Heltec WiFi LoRa 32 V3 | `Heltec_lora32_v3_meshlog` |
+| Heltec Wireless Stick Lite V3 HTIT-WSL-HF | `Heltec_wireless_stick_lite_v3_meshlog` |
 | Heltec WiFi LoRa 32 V4 | `Heltec_v4_meshlog` |
 | LilyGo T3-S3 | `LilyGo_T3S3_meshlog` |
 | LilyGo T-LoRa V2.1 | `LilyGo_TLora_v2_1_meshlog` |
 | Seeed XIAO ESP32-S3 + Wio-SX1262 | `Xiao_S3_meshlog` |
 
-### Experimental Wireless Stick Lite V3 candidate
+### Wireless Stick Lite V3 (HF) release candidate
 
-The **Heltec Wireless Stick Lite V3** (`HTIT-WSL-HF`, 863–928 MHz) has a separate,
-**unvalidated** build target: `Heltec_wireless_stick_lite_v3_meshlog`. It reuses the
+The **Heltec Wireless Stick Lite V3** (`HTIT-WSL-HF`, 863–928 MHz) has a separate
+build target: `Heltec_wireless_stick_lite_v3_meshlog`. It reuses the
 Heltec V3 ESP32-S3/SX1262 implementation and radio SPI/DIO/BUSY, Vext and battery
 pins, with the Lite's GPIO12 radio reset and its own board identity. It has no OLED.
-This target is **not** in the seven-board release/packaging matrix or the onboarding
-flasher. Compilation alone does not establish radio, Wi-Fi, battery or logger support.
+The project owner reports that the earlier image from source commit `e631b74`
+(SHA-256 `7f2b0713c2067715134c1c651cf8beed420ebe3040df791b3c1fcb37aad258ba`)
+was tested and works on the HF board. The scope of that field test was not recorded.
+That exact image is distinct from newly built release candidates: do not mark a new
+checksum validated, publish a tagged release, or replace the onboarding image until
+the release policy's per-artifact physical checks and owner approval are recorded.
+The LF (470–510 MHz) model is not included.
 
 Build a merged development image from a clean, committed checkout:
 
@@ -50,7 +56,7 @@ export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
 The resulting `.pio/build/Heltec_wireless_stick_lite_v3_meshlog/firmware-merged.bin`
 must be renamed to end in `-merged.bin` when distributed for custom flashing. It
 flashes at offset `0x0` and **erases the existing identity and configuration**.
-Verify boot/serial CLI, `get public.key`, `channel ls`, reception/transmission with
+For the exact new artifact, verify boot/serial CLI, `get public.key`, `channel ls`, reception/transmission with
 a known-good node, Wi-Fi upload, battery reading, reboot and sustained operation on
 the exact Lite V3 hardware before considering a release or web-flasher entry.
 
@@ -66,13 +72,13 @@ export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
 pio run -e Heltec_v2_meshlog -t mergebin
 ```
 
-`SOURCE_DATE_EPOCH` reduces time-derived variation in compiler strings, and direct dependencies/platforms are pinned in `platformio.ini`. These controls improve repeatability but do not guarantee bit-for-bit reproducibility across hosts or transitive tool changes. The PlatformIO pre-script refuses a dirty tree and records the full `HEAD`, environment, and epoch beside every build. A merged image is written to `.pio/build/<environment>/firmware-merged.bin`. Build all seven environments before packaging.
+`SOURCE_DATE_EPOCH` reduces time-derived variation in compiler strings, and direct dependencies/platforms are pinned in `platformio.ini`. These controls improve repeatability but do not guarantee bit-for-bit reproducibility across hosts or transitive tool changes. The PlatformIO pre-script refuses a dirty tree and records the full `HEAD`, environment, and epoch beside every build. A merged image is written to `.pio/build/<environment>/firmware-merged.bin`. Build all eight environments before packaging.
 
 Run tests and package the existing build outputs:
 
 ```sh
 python -m unittest discover -s tests -v
-for env in Generic_E22_meshlog Heltec_v2_meshlog Heltec_lora32_v3_meshlog Heltec_v4_meshlog \
+for env in Generic_E22_meshlog Heltec_v2_meshlog Heltec_lora32_v3_meshlog Heltec_wireless_stick_lite_v3_meshlog Heltec_v4_meshlog \
   LilyGo_T3S3_meshlog LilyGo_TLora_v2_1_meshlog Xiao_S3_meshlog; do
   pio run -e "$env" -t mergebin
 done

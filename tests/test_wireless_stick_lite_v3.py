@@ -1,4 +1,4 @@
-"""Keep the Lite V3 experimental build distinct from the validated Heltec V3."""
+"""Keep the Lite V3 HF target distinct from the Heltec LoRa 32 V3."""
 
 import configparser
 import unittest
@@ -12,7 +12,7 @@ ENV = "Heltec_wireless_stick_lite_v3_meshlog"
 
 
 class WirelessStickLiteV3Tests(unittest.TestCase):
-    def test_distinct_headless_hf_target_not_in_release_matrix(self):
+    def test_distinct_headless_hf_target_in_candidate_matrix(self):
         config = configparser.ConfigParser(interpolation=None)
         config.read(ROOT / "variants/heltec_v3/platformio.ini")
         lite = config[f"env:{ENV}"]
@@ -28,7 +28,8 @@ class WirelessStickLiteV3Tests(unittest.TestCase):
                             "SCLK": 9, "MOSI": 10, "MISO": 11}.items():
             self.assertIn(f"-D P_LORA_{signal}={pin}", shared["build_flags"])
         self.assertNotIn("DISPLAY_CLASS", shared["build_flags"])
-        self.assertNotIn(ENV, [env for _, _, env in BOARDS])
+        self.assertEqual([env for _, _, env in BOARDS].count(ENV), 1)
+        self.assertEqual(len(BOARDS), 8)
 
 
 if __name__ == "__main__":
